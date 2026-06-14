@@ -23,17 +23,17 @@ class PositionalEmbedding(nn.Module):
     def forward(self, x):
         return self.pe[:, :x.size(1)]
     
-class TokenEmbedding (nn.Module):
+class ValueEmbedding(nn.Module):
     def __init__(self, c_in, d_model):
-        super(TokenEmbedding, self).__init__()
-
-        padding = 1 if torch.__version__>= '1.5.0' else 2
-        self.tokenConvolution - nn.Conv1d(in_channels=c_in, out_channels=d_model, kernel_size=3, padding=padding, padding_mode='circular',bias=False)
+        super(ValueEmbedding, self).__init__()
+        padding = 1 if torch.__version__ >= '1.5.0' else 2
+        self.tokenConvolution = nn.Conv1d(in_channels=c_in, out_channels=d_model, kernel_size=3, padding=padding, padding_mode='circular', bias=False)
         for m in self.modules():
-            if (isinstance(m,nn.Conv1d)):
-                nn.init.kaiming_normal_(m.weight, mode = 'fan_in', nonlinearity = 'leaky_relu')
+            if isinstance(m, nn.Conv1d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='leaky_relu')
+                
     def forward(self, a):
-        a = self.tokenConvolution(a.permute(0,2,1)).permute(0,2,1)
+        a = self.tokenConvolution(a.permute(0, 2, 1)).permute(0, 2, 1)
         return a
     
 class TemporalEmbedding(nn.Module):
@@ -63,10 +63,12 @@ class DataEmbedding(nn.Module):
     def __init__(self, c_in, d_model, embed_type='fixed', max_len=5000, dropout=0.1):
         super(DataEmbedding, self).__init__()
 
-        self.value_embedding = TokenEmbedding(c_in=c_in, d_model=d_model)
+        self.value_embedding = ValueEmbedding(c_in=c_in, d_model=d_model)
         self.position_embedding = PositionalEmbedding(d_model=d_model, max_len=max_len)
         self.temporal_embedding = TemporalEmbedding(d_model=d_model, embed_type=embed_type)
         self.dropout = nn.Dropout(p=dropout)
 
     def forward(self, a, a_mark):
         return self.dropout(self.value_embedding(a) + self.position_embedding(a) + self.temporal_embedding(a_mark))
+
+
