@@ -71,4 +71,23 @@ class DataEmbedding(nn.Module):
     def forward(self, a, a_mark):
         return self.dropout(self.value_embedding(a) + self.position_embedding(a) + self.temporal_embedding(a_mark))
 
+if __name__ == "__main__":
+    batch_size = 2
+    seq_len = 96
+    c_in = 7      
+    d_model = 512 
 
+    x = torch.randn(batch_size, seq_len, c_in)
+    
+    x_mark = torch.zeros(batch_size, seq_len, 3)
+    x_mark[:, :, 0] = torch.randint(0, 24, (batch_size, seq_len))
+    x_mark[:, :, 1] = torch.randint(1, 32, (batch_size, seq_len))
+    x_mark[:, :, 2] = torch.randint(0, 7, (batch_size, seq_len))
+
+    embedding_layer = DataEmbedding(c_in=c_in, d_model=d_model, embed_type='fixed')
+    
+    output = embedding_layer(x, x_mark)
+    
+    print("Size of input x:", x.shape)
+    print("Size of input x_mark:", x_mark.shape)
+    print("Size of output after DataEmbedding:", output.shape)
