@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 
 
@@ -43,3 +44,39 @@ class FeedForward(nn.Module):
         x = self.dropout(x)        # regularization
         x = self.linear2(x)        # (B, T, d_ff) → (B, T, d_model)
         return x
+
+
+def main():
+    # Realistic ETT-style shapes (e.g. ETTm1 encoder window)
+    batch_size = 32
+    seq_len = 96          # encoder lookback window
+    d_model = 512
+    d_ff = 2048
+
+    x = torch.randn(batch_size, seq_len, d_model)
+    print("FeedForward — input shape:", tuple(x.shape))
+
+    # Case 1: GELU activation (default) preserves shape
+    ffn_gelu = FeedForward(d_model, d_ff, dropout=0.1, activation='gelu')
+    out_gelu = ffn_gelu(x)
+    print(f"[gelu] output shape: {tuple(out_gelu.shape)}  expected: ({batch_size}, {seq_len}, {d_model})")
+    assert out_gelu.shape == (batch_size, seq_len, d_model)
+
+    # Case 2: ReLU activation
+    ffn_relu = FeedForward(d_model, d_ff, dropout=0.1, activation='relu')
+    out_relu = ffn_relu(x)
+    print(f"[relu] output shape: {tuple(out_relu.shape)}")
+    assert out_relu.shape == (batch_size, seq_len, d_model)
+
+    # Case 3: unsupported activation must raise ValueError
+    try:
+        FeedForward(d_model, d_ff, activation='swish')
+        print("[invalid] ERROR: no exception raised")
+    except ValueError as e:
+        print(f"[invalid] correctly raised ValueError: {e}")
+
+    print("FeedForward tests passed.")
+
+
+if __name__ == "__main__":
+    main()

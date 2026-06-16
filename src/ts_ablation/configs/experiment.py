@@ -7,8 +7,8 @@ class ModelConfig(BaseModel):
     # Architecture
     d_model: int = 512
     n_heads: int = 8
-    e_layers: int = 2          # encoder layers
-    d_layers: int = 1          # decoder layers
+    e_layers: int = 4          # encoder layers
+    d_layers: int = 2          # decoder layers
     d_ff: int = 2048
     dropout: float = 0.1
     activation: Literal["relu", "gelu"] = "gelu"

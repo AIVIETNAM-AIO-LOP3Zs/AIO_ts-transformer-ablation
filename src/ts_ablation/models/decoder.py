@@ -228,3 +228,65 @@ class Decoder(nn.Module):
         if self.output_attention:
             return x, self_attentions, cross_attentions
         return x
+
+
+def main():
+    # Realistic ETT-style shapes:
+    #   encoder window seq_len=96; decoder input = label_len(48) + pred_len(24) = 72
+    batch_size = 32
+    seq_len_enc = 96
+    seq_len_dec = 72
+    d_model = 512
+    n_heads = 8
+    d_ff = 2048
+
+    x_dec = torch.randn(batch_size, seq_len_dec, d_model)   # decoder input
+    cross = torch.randn(batch_size, seq_len_enc, d_model)   # encoder memory
+    print("Decoder — x_dec:", tuple(x_dec.shape), " cross:", tuple(cross.shape))
+
+    # Case 1: single DecoderLayer with attention weights
+    layer = DecoderLayer(d_model, n_heads, d_ff, dropout=0.1,
+                         activation='gelu', output_attention=True)
+    out, self_attn, cross_attn = layer(x_dec, cross)
+    print(f"[layer/attn] out: {tuple(out.shape)}, self_attn: {tuple(self_attn.shape)}, cross_attn: {tuple(cross_attn.shape)}")
+    assert out.shape == (batch_size, seq_len_dec, d_model)
+    assert self_attn.shape == (batch_size, n_heads, seq_len_dec, seq_len_dec)
+    assert cross_attn.shape == (batch_size, n_heads, seq_len_dec, seq_len_enc)
+
+    # Case 2: Decoder stack (d_layers), no attention weights
+    decoder = Decoder(d_model, n_heads, d_ff, n_layers=2,
+                      dropout=0.1, activation='gelu')
+    out_stack = decoder(x_dec, cross)
+    print(f"[stack/no-attn] out: {tuple(out_stack.shape)}  expected: ({batch_size}, {seq_len_dec}, {d_model})")
+    assert out_stack.shape == (batch_size, seq_len_dec, d_model)
+
+    # Case 3: Decoder stack with attention weights collected per layer
+    decoder_a = Decoder(d_model, n_heads, d_ff, n_layers=2,
+                        dropout=0.1, activation='gelu', output_attention=True)
+    out_a, self_attns, cross_attns = decoder_a(x_dec, cross)
+    print(f"[stack/attn] out: {tuple(out_a.shape)}, num self/cross maps: {len(self_attns)}/{len(cross_attns)}")
+    assert len(self_attns) == 2 and len(cross_attns) == 2
+
+    # Case 4: causal self-attention combined with a decoder padding mask.
+    # Regression for the SDPA "both attn_mask and is_causal" crash — must NOT raise.
+    x_mask = torch.ones(batch_size, 1, 1, seq_len_dec, dtype=torch.bool)
+    x_mask[:, :, :, -4:] = False        # last 4 decoder steps are padding
+    out_masked = layer(x_dec, cross, x_mask=x_mask)[0]
+    print(f"[layer/causal+mask] out: {tuple(out_masked.shape)}  (no SDPA crash)")
+    assert out_masked.shape == (batch_size, seq_len_dec, d_model)
+
+    # Case 5: causal masking — perturbing future steps must not change past outputs
+    decoder_c = Decoder(d_model, n_heads, d_ff, n_layers=2, dropout=0.0).eval()
+    out1 = decoder_c(x_dec, cross)
+    x_dec2 = x_dec.clone()
+    x_dec2[:, 40:, :] += 5.0                       # change only future steps
+    out2 = decoder_c(x_dec2, cross)
+    leak = torch.max(torch.abs(out1[:, :40, :] - out2[:, :40, :])).item()
+    print(f"[causal] max past-output change after future perturbation: {leak:.2e}")
+    assert leak < 1e-5, "Future leaked into the past — causal masking broken!"
+
+    print("Decoder tests passed.")
+
+
+if __name__ == "__main__":
+    main()

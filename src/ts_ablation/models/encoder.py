@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 
 from .encoder_layer import EncoderLayer
@@ -67,3 +68,40 @@ class Encoder(nn.Module):
         if self.output_attention:
             return x, attentions
         return x
+
+
+def main():
+    # Realistic ETT-style encoder stack (e_layers=2 as in ModelConfig defaults)
+    batch_size = 32
+    seq_len = 96          # encoder lookback window
+    d_model = 512
+    n_heads = 8
+    d_ff = 2048
+    n_layers = 2
+
+    x = torch.randn(batch_size, seq_len, d_model)
+    print("Encoder — input shape:", tuple(x.shape))
+
+    # Case 1: stack forward, no attention weights
+    encoder = Encoder(d_model, n_heads, d_ff, n_layers=n_layers,
+                      dropout=0.1, activation='gelu')
+    out = encoder(x)
+    print(f"[no-attn] output shape: {tuple(out.shape)}  expected: ({batch_size}, {seq_len}, {d_model})")
+    assert out.shape == (batch_size, seq_len, d_model)
+
+    # Case 2: collect attention weights from every layer
+    encoder_attn = Encoder(d_model, n_heads, d_ff, n_layers=n_layers,
+                           dropout=0.1, activation='gelu', output_attention=True)
+    out_a, attentions = encoder_attn(x)
+    print(f"[attn] output shape: {tuple(out_a.shape)}, num attention maps: {len(attentions)}  expected: {n_layers}")
+    assert out_a.shape == (batch_size, seq_len, d_model)
+    assert len(attentions) == n_layers
+    for i, a in enumerate(attentions):
+        assert a.shape == (batch_size, n_heads, seq_len, seq_len), f"layer {i} attn shape {tuple(a.shape)}"
+    print(f"       each attn map shape: {tuple(attentions[0].shape)}")
+
+    print("Encoder tests passed.")
+
+
+if __name__ == "__main__":
+    main()

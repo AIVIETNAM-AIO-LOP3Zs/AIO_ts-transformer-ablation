@@ -44,69 +44,95 @@ class MultiHeadAttention(nn.Module):
         # Input: (B, H, T, d_head)
         # merge: (B, T_q, d_model)
 
+    def _build_attn_bias(self, attn_mask, is_causal, T_q, T_k, device, dtype):
+        """Build a single additive attention bias that merges an optional
+        ``attn_mask`` (bool: True=keep, or float: additive) with optional causal
+        masking. Returns a tensor broadcastable to (B, H, T_q, T_k), or ``None``.
+
+        Merging both into one bias lets us avoid SDPA's restriction that
+        ``attn_mask`` and ``is_causal=True`` cannot be supplied together.
+        """
+        bias = None
+        if attn_mask is not None:
+            if attn_mask.dtype == torch.bool:
+                bias = torch.zeros_like(attn_mask, dtype=dtype).masked_fill(~attn_mask, float("-inf"))
+            else:
+                bias = attn_mask.to(dtype)
+        if is_causal:
+            causal = torch.triu(
+                torch.ones(T_q, T_k, device=device, dtype=torch.bool), diagonal=1
+            )
+            causal_bias = torch.zeros(T_q, T_k, device=device, dtype=dtype).masked_fill(
+                causal, float("-inf")
+            )
+            bias = causal_bias if bias is None else bias + causal_bias
+        return bias
+
     def forward(self, queries, keys=None, values=None, attn_mask=None, is_causal=False):
         # Input:
         #   queries: (B, T_q, d_model)
         #   keys   : (B, T_k, d_model) hoặc None (self attention)
-        #   values : (B, T_k, d_model) hoặc None 
+        #   values : (B, T_k, d_model) hoặc None
         # Output:
         #   out    : (B, T_q, d_model)
-        
+
         if keys is None:
             keys = queries
         if values is None:
             values = keys
 
-        Q = self.W_q(queries)
-        K = self.W_k(keys)
-        V = self.W_v(values)
+        Q = self.split_heads(self.W_q(queries))
+        K = self.split_heads(self.W_k(keys))
+        V = self.split_heads(self.W_v(values))
 
-        Q = self.split_heads(Q)
-        K = self.split_heads(K)
-        V = self.split_heads(V)
-
-        attn_output = F.scaled_dot_product_attention(
-            Q, K, V,
-            attn_mask=attn_mask,
-            dropout_p=self.dropout.p if self.training else 0.0,
-            is_causal=is_causal
-        )
-        
-        out = self.combine_heads(attn_output)
-
-        out = self.fc_out(out)
-        out = self.dropout(out)
+        dropout_p = self.dropout.p if self.training else 0.0
 
         if self.output_attention:
-            #   Q: (B, H, T_q, d_head)
-            #   K: (B, H, T_k, d_head)
-            # Output:
-            #   scores: (B, H, T_q, T_k)
+            # Manual path: compute the attention weights ONCE and derive the
+            # output from them (no second, redundant attention computation).
+            #   Q: (B, H, T_q, d_head), K: (B, H, T_k, d_head)
+            #   scores / attn: (B, H, T_q, T_k)
+            T_q, T_k = Q.size(-2), K.size(-2)
             scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_head)
-            if is_causal:
-                T_q, T_k = scores.size(-2), scores.size(-1)
-                causal_mask = torch.triu(
-                    torch.ones(T_q, T_k, device=scores.device, dtype=torch.bool),
-                    diagonal=1
-                )
-                scores = scores.masked_fill(causal_mask.unsqueeze(0).unsqueeze(0), float("-inf"))
-            if attn_mask is not None:
-                if attn_mask.dtype == torch.bool:
-                    scores = scores.masked_fill(~attn_mask, float("-inf"))
-                else:
-                    scores = scores + attn_mask
+            bias = self._build_attn_bias(attn_mask, is_causal, T_q, T_k, Q.device, scores.dtype)
+            if bias is not None:
+                scores = scores + bias
             attn = torch.softmax(scores, dim=-1)
+            attn_output = torch.matmul(F.dropout(attn, p=dropout_p, training=self.training), V)
+        else:
+            # Fused path. Keep SDPA's fast causal kernel when there is no extra
+            # mask; otherwise merge causal + mask into one bias so we never pass
+            # both attn_mask and is_causal=True (which SDPA rejects).
+            if attn_mask is None:
+                attn_output = F.scaled_dot_product_attention(
+                    Q, K, V, attn_mask=None, dropout_p=dropout_p, is_causal=is_causal
+                )
+            else:
+                bias = self._build_attn_bias(
+                    attn_mask, is_causal, Q.size(-2), K.size(-2), Q.device, Q.dtype
+                )
+                attn_output = F.scaled_dot_product_attention(
+                    Q, K, V, attn_mask=bias, dropout_p=dropout_p, is_causal=False
+                )
+
+        out = self.combine_heads(attn_output)
+        out = self.fc_out(out)
+        # NOTE: no output dropout here — residual dropout is owned by the
+        # enclosing Encoder/Decoder layer, avoiding double dropout.
+
+        if self.output_attention:
             # Output:
             #   out : (B, T_q, d_model)
             #   attn: (B, H, T_q, T_k)
             return out, attn
-        
+
         # Output: (B, T_q, d_model)
         return out
 
 def main():
-    batch_size = 5
-    seq_len = 10
+    # Realistic ETT-style shapes: encoder lookback window seq_len=96
+    batch_size = 32
+    seq_len = 96
     d_model = 512
     n_heads = 8
 
@@ -121,7 +147,7 @@ def main():
     print(f"Expected: ({batch_size}, {n_heads}, {seq_len}, {seq_len})")
 
     print("CROSS ATTENTION")
-    seq_len_kv = 8
+    seq_len_kv = 72  # decoder query attends to encoder memory of a different length
     keys = torch.randn(batch_size, seq_len_kv, d_model)
     values = torch.randn(batch_size, seq_len_kv, d_model)
 

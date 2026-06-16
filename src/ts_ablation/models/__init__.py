@@ -3,6 +3,7 @@ from .feed_forward import FeedForward
 from .encoder_layer import EncoderLayer
 from .encoder import Encoder
 from .decoder import DecoderLayer, Decoder
+from .forecaster import TransformerForecaster
 
 __all__ = [
     "MultiHeadAttention",
@@ -11,4 +12,5 @@ __all__ = [
     "Encoder",
     "DecoderLayer",
     "Decoder",
+    "TransformerForecaster",
 ]

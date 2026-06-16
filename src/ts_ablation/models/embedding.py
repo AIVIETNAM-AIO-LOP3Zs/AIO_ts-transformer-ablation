@@ -16,8 +16,10 @@ def create_sin_cos_matrix(num_embeddings, d_model):
     
     # Fill even indices (0, 2, 4...) with sine waves
     weight[:, 0::2] = torch.sin(position * div_term)
-    # Fill odd indices (1, 3, 5...) with cosine waves
-    weight[:, 1::2] = torch.cos(position * div_term)
+    # Fill odd indices (1, 3, 5...) with cosine waves.
+    # Slice div_term to the number of odd columns so an *odd* d_model (where
+    # there are fewer odd than even indices) does not raise a shape mismatch.
+    weight[:, 1::2] = torch.cos(position * div_term[: weight[:, 1::2].size(1)])
     return weight
 
 class PositionalEmbedding(nn.Module):
@@ -36,9 +38,12 @@ class PositionalEmbedding(nn.Module):
 class ValueEmbedding(nn.Module):
     def __init__(self, c_in, d_model):
         super(ValueEmbedding, self).__init__()
-        # PyTorch 1.5.0 changed how padding behaves slightly; adjusting padding to keep dimensions consistent
-        padding = 1 if torch.__version__ >= '1.5.0' else 2
-        
+        # kernel_size=3 with circular padding=1 keeps the sequence length unchanged
+        # (out_len = L + 2*padding - kernel_size + 1 = L). Hardcoded because the old
+        # string comparison `torch.__version__ >= '1.5.0'` was lexicographic and wrong
+        # for versions like '1.10.0' (compares as < '1.5.0').
+        padding = 1
+
         # Use a 1D Convolution over the time steps to project raw features (c_in) to embedding space (d_model)
         self.tokenConvolution = nn.Conv1d(in_channels=c_in, out_channels=d_model, 
                                           kernel_size=3, padding=padding, 
