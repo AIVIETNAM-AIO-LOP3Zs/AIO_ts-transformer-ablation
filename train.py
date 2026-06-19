@@ -297,6 +297,11 @@ def main():
     }, indent=2))
     print(f"log written -> {log_path}")
 
+    # Save the best model checkpoint for later evaluation
+    ckpt_path = out_dir / f"{cfg.name}_{cfg.ablation_tag()}.pt"
+    torch.save(best_state or model.state_dict(), ckpt_path)
+    print(f"checkpoint saved -> {ckpt_path}")
+
 
 if __name__ == "__main__":
     main()
