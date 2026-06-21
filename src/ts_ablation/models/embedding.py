@@ -109,7 +109,7 @@ class DataEmbedding(nn.Module):
     def forward(self, a, a_mark):
         # Sum the three distinct embeddings together (element-wise addition) and apply dropout
         # Due to PyTorch broadcasting, the position embedding (1, L, D) automatically stretches to match the Batch size.
-        return self.dropout(self.value_embedding(a) + self.position_embedding(a) + self.temporal_embedding(a_mark))
+        return self.dropout(self.value_embedding(a))
 
 if __name__ == "__main__":
     # Mock parameters representing a typical Informer/Autoformer pipeline execution
