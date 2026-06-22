@@ -32,15 +32,23 @@ class ETTDataset(Dataset):
             sl = slice(train_idx, val_idx)
         else:
             sl = slice(val_idx, n)
+
+        # Normalize features only (never the calendar marks).
+        # IMPORTANT: fit the scaler on the TRAIN split *only*, then transform the
+        # requested split. Fitting per-split would normalize val/test by their own
+        # statistics — a data leak that makes metrics incomparable to the standard
+        # ETT benchmark (Informer/Autoformer fit on train and apply to all splits).
+        if scale:
+            self.scaler = StandardScaler()
+            self.scaler.fit(df.iloc[0:train_idx].values)
+
         df = df.iloc[sl]
         df_stamp = df_stamp.iloc[sl]
 
-        # Normalize features only (never the calendar marks)
         if scale:
-            self.scaler = StandardScaler()
             df = pd.DataFrame(
-                self.scaler.fit_transform(df),
-                columns=df.columns
+                self.scaler.transform(df.values),
+                columns=df.columns,
             )
 
         self.data = df.values
