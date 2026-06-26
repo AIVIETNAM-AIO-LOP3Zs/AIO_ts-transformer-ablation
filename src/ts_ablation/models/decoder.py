@@ -16,12 +16,13 @@ class DecoderLayer(nn.Module):
     """
 
     def __init__(self, d_model, n_heads, d_ff, dropout=0.1,
-                 activation='gelu', output_attention=False):
+                 activation='gelu', output_attention=False, use_self_attention=True):
         # Initialize the base class nn.Module
         super(DecoderLayer, self).__init__()
 
         # Save config flag for outputting attention weights
         self.output_attention = output_attention
+        self.use_self_attention = use_self_attention
 
         # First normalization layer (applied before Self-Attention)
         self.norm1 = nn.LayerNorm(d_model)
@@ -62,7 +63,7 @@ class DecoderLayer(nn.Module):
         # Dropout layer after FFN
         self.dropout3 = nn.Dropout(dropout)
 
-    def forward(self, x, cross, x_mask=None, cross_mask=None):
+    def forward(self, x, cross, x_mask=None, cross_mask=None, is_causal=True):
         """
         Forward pass of a single Decoder layer.
 
@@ -89,23 +90,26 @@ class DecoderLayer(nn.Module):
         # Apply LayerNorm before sub-layer (Pre-LN)
         x = self.norm1(x)
 
-        # Apply Self-Attention with Q = K = V = x
-        # Note: is_causal=True to mask future tokens (causal masking)
-        if self.output_attention:
-            # If outputting attention weights, returns (output, attention_weights)
-            x, self_attn_weights = self.self_attention(
-                queries=x, keys=x, values=x, attn_mask=x_mask, is_causal=True
-            )
-        else:
-            # If not, returns only the output tensor
-            x = self.self_attention(
-                queries=x, keys=x, values=x, attn_mask=x_mask, is_causal=True
-            )
-            self_attn_weights = None
+        # Apply Self-Attention with Q = K = V = x if enabled
+        # Note: is_causal defaults to True to mask future tokens (causal masking)
+        if self.use_self_attention:
+            if self.output_attention:
+                # If outputting attention weights, returns (output, attention_weights)
+                x, self_attn_weights = self.self_attention(
+                    queries=x, keys=x, values=x, attn_mask=x_mask, is_causal=is_causal
+                )
+            else:
+                # If not, returns only the output tensor
+                x = self.self_attention(
+                    queries=x, keys=x, values=x, attn_mask=x_mask, is_causal=is_causal
+                )
+                self_attn_weights = None
 
-        # Add residual connection after applying dropout
-        # Output shape remains (B, L_dec, d_model)
-        x = residual + self.dropout1(x)
+            # Add residual connection after applying dropout
+            # Output shape remains (B, L_dec, d_model)
+            x = residual + self.dropout1(x)
+        else:
+            self_attn_weights = None
 
         # ─────────────────────────────────────────────────────────────────
         # 2. SUB-LAYER 2: Cross-Attention + Residual Connection (Pre-LN)
@@ -164,12 +168,13 @@ class Decoder(nn.Module):
     """
 
     def __init__(self, d_model, n_heads, d_ff, n_layers=1,
-                 dropout=0.1, activation='gelu', output_attention=False):
+                 dropout=0.1, activation='gelu', output_attention=False, use_self_attention=True):
         # Initialize the base class nn.Module
         super(Decoder, self).__init__()
 
         # Save config flag for outputting attention weights
         self.output_attention = output_attention
+        self.use_self_attention = use_self_attention
 
         # Use nn.ModuleList to manage the N stacked DecoderLayer instances
         self.layers = nn.ModuleList([
@@ -180,6 +185,7 @@ class Decoder(nn.Module):
                 dropout=dropout,
                 activation=activation,
                 output_attention=output_attention,
+                use_self_attention=use_self_attention,
             )
             # Loop N times to instantiate N independent layers
             for _ in range(n_layers)
@@ -189,7 +195,7 @@ class Decoder(nn.Module):
         # Crucial for stable gradients in Pre-LN architecture
         self.norm = nn.LayerNorm(d_model)
 
-    def forward(self, x, cross, x_mask=None, cross_mask=None):
+    def forward(self, x, cross, x_mask=None, cross_mask=None, is_causal=True):
         """
         Forward pass through the entire Decoder stack.
 
@@ -198,6 +204,7 @@ class Decoder(nn.Module):
             cross: Encoder outputs of shape (B, L_enc, d_model)
             x_mask: Attention mask for Self-Attention
             cross_mask: Attention mask for Cross-Attention
+            is_causal: Whether to apply causal masking in Decoder self-attention
 
         Returns:
             Predicted output tensor of shape (B, L_dec, d_model)
@@ -212,14 +219,14 @@ class Decoder(nn.Module):
             if self.output_attention:
                 # If outputting attention weights, retrieve the output and weights
                 x, self_attn, cross_attn = layer(
-                    x, cross, x_mask=x_mask, cross_mask=cross_mask
+                    x, cross, x_mask=x_mask, cross_mask=cross_mask, is_causal=is_causal
                 )
                 # Store attention weights for the current layer
                 self_attentions.append(self_attn)
                 cross_attentions.append(cross_attn)
             else:
                 # If not, just pass the output x to the next layer
-                x = layer(x, cross, x_mask=x_mask, cross_mask=cross_mask)
+                x = layer(x, cross, x_mask=x_mask, cross_mask=cross_mask, is_causal=is_causal)
 
         # Apply final LayerNorm (Pre-LN requirement)
         x = self.norm(x)

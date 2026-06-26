@@ -1,0 +1,5 @@
+variant,test_mse,test_mae,delta_mse,best_val_mse,n_params,epochs_run,elapsed_sec
+baseline,2.355892,1.096562,+0.000000,1.401708,120583,10,14.5
+no-self-attention,2.277917,1.191157,-0.077976,1.429319,120583,9,11.8
+no-causal-mask,2.552980,1.171499,+0.197088,1.486580,120583,10,17.4
+no-decoder,1.999099,1.167676,-0.356793,2.193238,1152488,4,5.1

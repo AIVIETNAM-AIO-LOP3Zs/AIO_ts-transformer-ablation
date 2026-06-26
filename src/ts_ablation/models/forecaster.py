@@ -37,9 +37,14 @@ class TransformerForecaster(nn.Module):
     def __init__(self, enc_in, dec_in, c_out, d_model=512, n_heads=8,
                  e_layers=2, d_layers=1, d_ff=2048, dropout=0.1,
                  activation='gelu', pred_len=24, embed_type='fixed',
-                 max_len=5000):
+                 max_len=5000, use_decoder=True, dec_use_self_attention=True,
+                 dec_use_causal_mask=True, seq_len=96):
         super().__init__()
         self.pred_len = pred_len
+        self.use_decoder = use_decoder
+        self.dec_use_self_attention = dec_use_self_attention
+        self.dec_use_causal_mask = dec_use_causal_mask
+        self.seq_len = seq_len
 
         # Separate embeddings for encoder and decoder streams (they may have a
         # different number of input features, e.g. in 'MS' mode).
@@ -53,10 +58,15 @@ class TransformerForecaster(nn.Module):
         self.decoder = Decoder(
             d_model=d_model, n_heads=n_heads, d_ff=d_ff,
             n_layers=d_layers, dropout=dropout, activation=activation,
+            use_self_attention=self.dec_use_self_attention,
         )
 
-        # Map the decoder's d_model representation back to the target space.
-        self.projection = nn.Linear(d_model, c_out)
+        # Map the representation back to the target space.
+        if self.use_decoder:
+            self.projection = nn.Linear(d_model, c_out)
+        else:
+            # Encoder-only: map flattened encoder output (seq_len * d_model) to (pred_len * c_out)
+            self.projection = nn.Linear(seq_len * d_model, pred_len * c_out)
 
     def forward(self, x_enc, x_enc_mark, x_dec, x_dec_mark,
                 enc_mask=None, dec_self_mask=None, dec_cross_mask=None):
@@ -74,15 +84,23 @@ class TransformerForecaster(nn.Module):
         enc_in = self.enc_embedding(x_enc, x_enc_mark)
         enc_out = self.encoder(enc_in, attn_mask=enc_mask)
 
-        # Decoder: causal self-attention over its own sequence + cross-attention
-        # to the encoder memory. (Causality is enforced inside DecoderLayer.)
-        dec_in = self.dec_embedding(x_dec, x_dec_mark)
-        dec_out = self.decoder(dec_in, enc_out,
-                               x_mask=dec_self_mask, cross_mask=dec_cross_mask)
+        if self.use_decoder:
+            # Decoder: causal self-attention over its own sequence + cross-attention
+            # to the encoder memory. (Causality is controlled dynamically.)
+            dec_in = self.dec_embedding(x_dec, x_dec_mark)
+            dec_out = self.decoder(dec_in, enc_out,
+                                   x_mask=dec_self_mask, cross_mask=dec_cross_mask,
+                                   is_causal=self.dec_use_causal_mask)
+            # Project to target space and keep only the forecast horizon.
+            out = self.projection(dec_out)          # (B, label_len + pred_len, c_out)
+            return out[:, -self.pred_len:, :]       # (B, pred_len, c_out)
+        else:
+            # No-Decoder Baseline: project directly from encoder outputs.
+            B, S, D = enc_out.shape
+            enc_flat = enc_out.reshape(B, S * D)    # (B, seq_len * d_model)
+            out = self.projection(enc_flat)         # (B, pred_len * c_out)
+            return out.reshape(B, self.pred_len, -1) # (B, pred_len, c_out)
 
-        # Project to target space and keep only the forecast horizon.
-        out = self.projection(dec_out)          # (B, label_len + pred_len, c_out)
-        return out[:, -self.pred_len:, :]       # (B, pred_len, c_out)
 
 
 def main():
