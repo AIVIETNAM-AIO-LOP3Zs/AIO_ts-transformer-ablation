@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from .encoder_layer import EncoderLayer
+from .encoder_layer import EncoderLayer, AblationEncoderLayer
 
 
 class Encoder(nn.Module):
@@ -63,6 +63,68 @@ class Encoder(nn.Module):
                 x = layer(x, attn_mask=attn_mask)
 
         # Final normalization
+        x = self.norm(x)
+
+        if self.output_attention:
+            return x, attentions
+        return x
+
+
+class AblationEncoder(nn.Module):
+    """Encoder with per-component ablation switches.
+
+    Same interface as ``Encoder`` but uses ``AblationEncoderLayer`` so that
+    individual sub-components (attention, FFN, residual, layer-norm) can be
+    toggled on/off to measure their contribution to historic feature extraction.
+
+    Args:
+        d_model, n_heads, d_ff, n_layers, dropout, activation, output_attention:
+            Same as ``Encoder``.
+        use_attention: Enable/disable self-attention in every layer.
+        use_ffn: Enable/disable FFN in every layer.
+        use_residual: Enable/disable residual connections in every layer.
+        use_layer_norm: Enable/disable LayerNorm in every layer.
+    """
+
+    def __init__(self, d_model, n_heads, d_ff, n_layers=2,
+                 dropout=0.1, activation='gelu', output_attention=False,
+                 use_attention=True, use_ffn=True,
+                 use_residual=True, use_layer_norm=True):
+        super().__init__()
+
+        self.output_attention = output_attention
+
+        self.layers = nn.ModuleList([
+            AblationEncoderLayer(
+                d_model=d_model,
+                n_heads=n_heads,
+                d_ff=d_ff,
+                dropout=dropout,
+                activation=activation,
+                output_attention=output_attention,
+                use_attention=use_attention,
+                use_ffn=use_ffn,
+                use_residual=use_residual,
+                use_layer_norm=use_layer_norm,
+            )
+            for _ in range(n_layers)
+        ])
+
+        # Final LayerNorm — keep it even when use_layer_norm=False for the
+        # inner layers so the output scale stays comparable across variants.
+        self.norm = nn.LayerNorm(d_model)
+
+    def forward(self, x, attn_mask=None):
+        """Same interface as ``Encoder.forward``."""
+        attentions = []
+
+        for layer in self.layers:
+            if self.output_attention:
+                x, attn = layer(x, attn_mask=attn_mask)
+                attentions.append(attn)
+            else:
+                x = layer(x, attn_mask=attn_mask)
+
         x = self.norm(x)
 
         if self.output_attention:

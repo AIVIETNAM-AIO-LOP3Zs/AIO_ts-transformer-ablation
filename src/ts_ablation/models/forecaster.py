@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 from .embedding import DataEmbedding
-from .encoder import Encoder
+from .encoder import Encoder, AblationEncoder
 from .decoder import Decoder
 
 
@@ -13,9 +13,9 @@ class TransformerForecaster(nn.Module):
     building blocks into a single execution flow:
 
         x_enc, x_enc_mark ─► DataEmbedding ─► Encoder ─────────────┐ (memory)
-                                                                   ▼
+                                                                    ▼
         x_dec, x_dec_mark ─► DataEmbedding ─► Decoder(self-causal, cross) ─►
-                                                  Linear projection ─► y_hat
+                                                   Linear projection ─► y_hat
 
     The decoder input follows the Informer convention: the first ``label_len``
     steps are the known tail of the lookback window and the last ``pred_len``
@@ -32,12 +32,16 @@ class TransformerForecaster(nn.Module):
                   are returned.
         embed_type: 'fixed' (sin/cos calendar embeddings) or 'learned'.
         max_len:  max sequence length supported by the positional embedding.
+        enc_use_attention, enc_use_ffn, enc_use_residual, enc_use_layer_norm:
+                  encoder component ablation switches (all True by default).
     """
 
     def __init__(self, enc_in, dec_in, c_out, d_model=512, n_heads=8,
                  e_layers=2, d_layers=1, d_ff=2048, dropout=0.1,
                  activation='gelu', pred_len=24, embed_type='fixed',
-                 max_len=5000):
+                 max_len=5000,
+                 enc_use_attention=True, enc_use_ffn=True,
+                 enc_use_residual=True, enc_use_layer_norm=True):
         super().__init__()
         self.pred_len = pred_len
 
@@ -46,10 +50,23 @@ class TransformerForecaster(nn.Module):
         self.enc_embedding = DataEmbedding(enc_in, d_model, embed_type, max_len, dropout)
         self.dec_embedding = DataEmbedding(dec_in, d_model, embed_type, max_len, dropout)
 
-        self.encoder = Encoder(
-            d_model=d_model, n_heads=n_heads, d_ff=d_ff,
-            n_layers=e_layers, dropout=dropout, activation=activation,
-        )
+        # Use AblationEncoder when any switch is non-default, otherwise
+        # the original Encoder (identical behaviour, zero overhead).
+        _needs_ablation = not all([enc_use_attention, enc_use_ffn,
+                                   enc_use_residual, enc_use_layer_norm])
+        if _needs_ablation:
+            self.encoder = AblationEncoder(
+                d_model=d_model, n_heads=n_heads, d_ff=d_ff,
+                n_layers=e_layers, dropout=dropout, activation=activation,
+                use_attention=enc_use_attention, use_ffn=enc_use_ffn,
+                use_residual=enc_use_residual, use_layer_norm=enc_use_layer_norm,
+            )
+        else:
+            self.encoder = Encoder(
+                d_model=d_model, n_heads=n_heads, d_ff=d_ff,
+                n_layers=e_layers, dropout=dropout, activation=activation,
+            )
+
         self.decoder = Decoder(
             d_model=d_model, n_heads=n_heads, d_ff=d_ff,
             n_layers=d_layers, dropout=dropout, activation=activation,

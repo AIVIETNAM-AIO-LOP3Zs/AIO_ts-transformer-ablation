@@ -19,6 +19,12 @@ class ModelConfig(BaseModel):
     use_decomposition: bool = False    # trend/seasonal decomp (Autoformer-style)
     use_decoder: bool = True           # encoder-only vs encoder-decoder
 
+    # Encoder component ablation switches
+    enc_use_attention: bool = True     # toggle self-attention in encoder layers
+    enc_use_ffn: bool = True           # toggle FFN in encoder layers
+    enc_use_residual: bool = True      # toggle residual/skip connections
+    enc_use_layer_norm: bool = True    # toggle LayerNorm before sub-layers
+
 
 class TrainConfig(BaseModel):
     epochs: int = 10
@@ -53,4 +59,13 @@ class ExperimentConfig(BaseModel):
             f"dec={'on' if m.use_decoder else 'off'}",
             f"L={m.e_layers}",
         ]
+        # Append encoder ablation switches only when non-default (off)
+        if not m.enc_use_attention:
+            parts.append("enc-attn=off")
+        if not m.enc_use_ffn:
+            parts.append("enc-ffn=off")
+        if not m.enc_use_residual:
+            parts.append("enc-res=off")
+        if not m.enc_use_layer_norm:
+            parts.append("enc-ln=off")
         return "_".join(parts)

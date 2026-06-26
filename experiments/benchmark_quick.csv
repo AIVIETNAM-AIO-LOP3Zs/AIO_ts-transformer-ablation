@@ -1,0 +1,2 @@
+dataset,pred_len,test_mse,test_mae,best_val_mse,n_params,epochs_run,elapsed_sec
+ETTh1,96,2.786452,1.282388,2.413714,10535943,1,2.3

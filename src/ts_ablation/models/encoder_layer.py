@@ -84,6 +84,110 @@ class EncoderLayer(nn.Module):
         return x
 
 
+class AblationEncoderLayer(nn.Module):
+    """Encoder Layer with ablation switches for component-level analysis.
+
+    Identical to ``EncoderLayer`` but each sub-component can be independently
+    disabled to measure its contribution to the encoder's historic feature
+    extraction capability.
+
+    Ablation switches:
+        use_attention:  If False, skip self-attention (sub-layer 1 → identity).
+        use_ffn:        If False, skip the feed-forward network (sub-layer 2 → identity).
+        use_residual:   If False, remove skip connections (output = sub-layer only).
+        use_layer_norm: If False, remove LayerNorm before each sub-layer.
+
+    Args:
+        d_model: Dimension of the model.
+        n_heads: Number of attention heads.
+        d_ff: Dimension of the inner feed-forward layer.
+        dropout: Dropout probability.
+        activation: Activation for FFN, either ``'relu'`` or ``'gelu'``.
+        output_attention: If ``True``, also return attention weights.
+        use_attention: Enable/disable self-attention sub-layer.
+        use_ffn: Enable/disable feed-forward sub-layer.
+        use_residual: Enable/disable residual (skip) connections.
+        use_layer_norm: Enable/disable LayerNorm before each sub-layer.
+    """
+
+    def __init__(self, d_model, n_heads, d_ff, dropout=0.1,
+                 activation='gelu', output_attention=False,
+                 use_attention=True, use_ffn=True,
+                 use_residual=True, use_layer_norm=True):
+        super().__init__()
+
+        self.output_attention = output_attention
+        self.use_attention = use_attention
+        self.use_ffn = use_ffn
+        self.use_residual = use_residual
+        self.use_layer_norm = use_layer_norm
+
+        # Sub-layer 1: Multi-Head Self-Attention
+        self.norm1 = nn.LayerNorm(d_model)
+        self.attention = MultiHeadAttention(
+            d_model=d_model,
+            n_heads=n_heads,
+            dropout=dropout,
+            output_attention=output_attention,
+        )
+        self.dropout1 = nn.Dropout(dropout)
+
+        # Sub-layer 2: Position-wise Feed-Forward Network
+        self.norm2 = nn.LayerNorm(d_model)
+        self.ffn = FeedForward(
+            d_model=d_model,
+            d_ff=d_ff,
+            dropout=dropout,
+            activation=activation,
+        )
+        self.dropout2 = nn.Dropout(dropout)
+
+    def forward(self, x, attn_mask=None):
+        """
+        Args:
+            x: Tensor of shape ``(B, T, d_model)``.
+            attn_mask: Optional attention mask.
+
+        Returns:
+            Tensor of shape ``(B, T, d_model)``.
+            If ``output_attention=True``, also returns attention weights
+            (or ``None`` when attention is disabled).
+        """
+        attn_weights = None
+
+        # ── Sub-layer 1: Attention ──
+        if self.use_attention:
+            residual = x
+            if self.use_layer_norm:
+                x = self.norm1(x)
+
+            if self.output_attention:
+                x, attn_weights = self.attention(x, attn_mask=attn_mask)
+            else:
+                x = self.attention(x, attn_mask=attn_mask)
+
+            x = self.dropout1(x)
+            if self.use_residual:
+                x = residual + x
+        # else: identity — x passes through unchanged
+
+        # ── Sub-layer 2: FFN ──
+        if self.use_ffn:
+            residual = x
+            if self.use_layer_norm:
+                x = self.norm2(x)
+
+            x = self.ffn(x)
+            x = self.dropout2(x)
+            if self.use_residual:
+                x = residual + x
+        # else: identity — x passes through unchanged
+
+        if self.output_attention:
+            return x, attn_weights
+        return x
+
+
 def main():
     # Realistic ETT-style encoder window
     batch_size = 32
