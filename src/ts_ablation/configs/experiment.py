@@ -19,6 +19,10 @@ class ModelConfig(BaseModel):
     use_decomposition: bool = False    # trend/seasonal decomp (Autoformer-style)
     use_decoder: bool = True           # encoder-only vs encoder-decoder
 
+    # Decoder component ablation switches (decoder_arch variant)
+    dec_use_self_attention: bool = True  # whether to use Self-Attention in Decoder
+    dec_use_causal_mask: bool = True     # whether to apply causal masking in Decoder self-attention
+
 
 class TrainConfig(BaseModel):
     epochs: int = 10
@@ -51,6 +55,8 @@ class ExperimentConfig(BaseModel):
             f"pe={'on' if m.use_positional_encoding else 'off'}",
             f"decomp={'on' if m.use_decomposition else 'off'}",
             f"dec={'on' if m.use_decoder else 'off'}",
+            f"dec_self_attn={'on' if m.dec_use_self_attention else 'off'}",
+            f"dec_mask={'on' if m.dec_use_causal_mask else 'off'}",
             f"L={m.e_layers}",
         ]
         return "_".join(parts)

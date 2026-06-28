@@ -58,7 +58,7 @@ from ts_ablation.configs.experiment import (
     ModelConfig,
     TrainConfig,
 )
-from ts_ablation.models import TransformerForecaster
+from ts_ablation.decoder_arch.models import TransformerForecaster
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -236,6 +236,10 @@ def main():
         e_layers=cfg.model.e_layers, d_layers=cfg.model.d_layers,
         d_ff=cfg.model.d_ff, dropout=cfg.model.dropout,
         activation=cfg.model.activation, pred_len=cfg.data.pred_len,
+        use_decoder=cfg.model.use_decoder,
+        dec_use_self_attention=cfg.model.dec_use_self_attention,
+        dec_use_causal_mask=cfg.model.dec_use_causal_mask,
+        seq_len=cfg.data.seq_len,
     ).to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"model params: {n_params:,}  (enc_in={enc_in}, dec_in={dec_in}, c_out={c_out})")

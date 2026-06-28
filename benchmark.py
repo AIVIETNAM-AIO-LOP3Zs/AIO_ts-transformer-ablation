@@ -56,7 +56,7 @@ from ts_ablation.configs.standard import (
     STANDARD_HORIZONS,
     standard_config,
 )
-from ts_ablation.models import TransformerForecaster
+from ts_ablation.decoder_arch.models import TransformerForecaster
 
 # Reuse the data/eval/train building blocks already validated by train.py.
 from train import evaluate, infer_dims, make_loader, pick_device, train_one_epoch
@@ -168,6 +168,10 @@ def run_cell(cfg, device, *, eta=None, weight=0, max_train=None, max_eval=None,
         e_layers=cfg.model.e_layers, d_layers=cfg.model.d_layers,
         d_ff=cfg.model.d_ff, dropout=cfg.model.dropout,
         activation=cfg.model.activation, pred_len=cfg.data.pred_len,
+        use_decoder=cfg.model.use_decoder,
+        dec_use_self_attention=cfg.model.dec_use_self_attention,
+        dec_use_causal_mask=cfg.model.dec_use_causal_mask,
+        seq_len=cfg.data.seq_len,
     ).to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
