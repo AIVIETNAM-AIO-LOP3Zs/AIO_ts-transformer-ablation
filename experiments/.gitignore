@@ -1,3 +1,4 @@
 # generated experiment run logs
 *.json
+*.csv
 !.gitkeep
